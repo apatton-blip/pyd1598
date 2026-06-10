@@ -1,0 +1,15 @@
+// {type:state}
+(Initialize Pins SI & DL Pins)->(Set Config -> Forced Readout)->(Verify)
+
+(Verify)->(Set Config)
+(Verify)[Verification Fails]->(Set Config -> Forced Readout)
+(Verify)[Verification Fails x3]->(end)
+
+(Set Config)[Forced Readout]->(Forced Readout NORM OP)
+(Forced Readout NORM OP)->(PULL DL HIGH)->(PULL DL LOW 2)->(Readout of Bits 1)->(Forced Readout NORM OP)
+
+(Set Config)[Inturrupt Readout]->(Push Config [x3] 0)->(Inturrupt Readout NORM OP)
+(Inturrupt Readout NORM OP)->(Wait PIR pull DL HIGH 1)->(PULL DL LOW 1)->(Readout of Bits 0)->(Inturrupt Readout NORM OP)
+
+(Set Config)[Wakeup]->(Push Config [x3] 1)->(Wakeup NORM OP)
+(Wakeup NORM OP)->(Wait PIR pull DL HIGH 0)->(PULL DL LOW 0)->(Readout of Bits*)->(Complete Work*)->(Wakeup NORM OP)

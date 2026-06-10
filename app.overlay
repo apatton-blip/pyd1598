@@ -1,0 +1,8 @@
+/ {
+    pyd1598: pir-sensor {
+        compatible = "tactacam,pyd1598";
+        status = "okay";
+        serin-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+        direct-link-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+    };
+};

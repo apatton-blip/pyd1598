@@ -1,0 +1,16 @@
+description: Tactacam PYD1598 PIR Sensor
+
+compatible: "tactacam,pyd1598"
+
+include: base.yaml
+
+properties:
+  serin-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO pin for the serial communication line (P3).
+
+  direct-link-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO pin for the proprietary direct link line (P1).
