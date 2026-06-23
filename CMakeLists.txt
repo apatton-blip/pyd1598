@@ -6,6 +6,7 @@ project(pyd1598)
 list(APPEND EXTRA_DTC_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/dts/bindings")
 
 target_sources( app PRIVATE 
+    src/pyd1598/pyd1598.c
     src/main.c
-    src/pyd1598.c
-    )
+    src/debug.c
+)

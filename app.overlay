@@ -1,8 +1,47 @@
+#include <zephyr/dt-bindings/gpio/nordic-nrf-gpio.h>
+
 / {
+    debug_pins {
+        compatible = "gpio-leds";
+
+        debug_pin_0: debug_pin_0 {
+            gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+        };
+
+        debug_pin_1: debug_pin_1 {
+            gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+        };
+    };
+
     pyd1598: pir-sensor {
         compatible = "tactacam,pyd1598";
         status = "okay";
-        serin-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+        spi-peripheral = <&spi21>;
         direct-link-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
     };
+};
+
+&pinctrl {
+    spim21_default: spim21_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_MOSI, 1, 10)>;
+        };
+    };
+
+    spim21_sleep: spim21_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_MOSI, 1, 10)>;
+            low-power-enable;
+        };
+    };
+};
+
+&spi21 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+
+    pinctrl-0 = <&spim21_default>;
+    pinctrl-1 = <&spim21_sleep>;
+
+    pinctrl-names = "default", "sleep";
 };
