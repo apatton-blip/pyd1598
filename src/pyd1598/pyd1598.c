@@ -14,25 +14,26 @@
 #define LL_LOW 0
 
 // SERIN SPI CONFIG
-#define CAP_LOAD_TIME_US 150
-#define MAX_TX_BUFFER_SIZE 500
+#define CAP_LOAD_TIME_US 64000
+#define MAX_TX_BUFFER_SIZE 1000
 #define PER_BYTE_TIME_US 8 // 1MHz Clk -> (1 us / 1 bit) * (8 bits / 1 byte) = 8 us / byte
 #define CLK_END_HIGH_BYTE 0x7F // 0111 1111
 #define CLK_END_LOW_BYTE 0x40 //  0100 0000
 #define NUM_HOLD_BYTES DATA_IN_HOLD_TIME_US / PER_BYTE_TIME_US // hold time will be rounded down to a multiple of PER_BYTE_TIME_US
 
-// parameters defined in pyd1598 datasheet
+// approx. parameters defined in pyd1598 datasheet
+
 // SERIN
+#define NUM_SERIAL_BITS 25
 #define DATA_CLK_LOW_TIME_US 1
 #define DATA_CLK_HIGH_TIME_US 1
-#define DATA_IN_HOLD_TIME_US 220
-#define DATA_LOAD_TIME_US 2500
+#define DATA_IN_HOLD_TIME_US 120
+#define DATA_LOAD_TIME_US 650
 
 // DIRECT-LINK
-#define NUM_SERIAL_BITS 25
 #define NUM_DATA_BITS 40
-#define DATA_SETUP_TIME_US 300
-#define BIT_TIME_US 13 // will depend on capacitive load of direct link
+#define DATA_SETUP_TIME_US 150
+#define BIT_TIME_US 5 // will depend on capacitive load of direct link
 #define UPDATE_TIME_US 1250
 #define CONFIG_UPDATE_TIME_US 2400
 
@@ -114,6 +115,13 @@ static const struct spi_config spi_cfg = {
     .slave = 0,
     .cs = {{{{0}}}}
 };
+
+// static const struct spi_config spi_cfg = {
+//     .frequency = 1000000, // 1 MHz (1us resolution)
+//     .operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8),
+//     .slave = 0,
+//     .cs = {{{{0}}}}
+// };
 
 static uint8_t DATA_LOAD_BUF[DATA_LOAD_TIME_US / PER_BYTE_TIME_US + 1] = {0};
 static uint8_t TX_ACK[CAP_LOAD_TIME_US / PER_BYTE_TIME_US + 1];
@@ -234,17 +242,10 @@ count_mode config_get_current_count_mode(const struct device* dev){
 
 static void reset_dl(const struct device* dev){
     const pyd1598_itf_t* itf = dev->config;
-    if (config_get_current_operation_modes(dev) != OPERATION_MODES_FORCED_READOUT){
-        printk("interrupts are enabled.\n");
-        gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_INPUT);
-        gpio_pin_interrupt_configure_dt(&itf->direct_link_gpio, GPIO_INT_EDGE_RISING);
-    }
-    else {
-        // gpio_pin_interrupt_configure_dt(&itf->direct_link_gpio, GPIO_INT_DISABLE);
+    if (config_get_current_operation_modes(dev) == OPERATION_MODES_FORCED_READOUT)
         gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
-        printk("interrupts are disabled.\n");
-    }
-    
+    else
+        gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_INPUT);
 }
 
 // build and load configuration into SPI memory
@@ -269,72 +270,73 @@ static int build_config(const struct device* dev){
     return SUCCESS;
 }
 
-// flash PIR using SPI MOSI, and sync current config with target
+// flash PIR using SPfI MOSI, and sync current config with target
 static int flash_config(const struct device* dev){
     pyd1598_buf_t* buf = dev->data;
     const pyd1598_itf_t* itf = dev->config;
-    gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
+    fast_gpio_output_low(&buf->fast_direct_link);
+    // gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
     int ret = spi_write(itf->spi_bus, &spi_cfg, &buf->spi_set_buffers);
     if (ret){
         return ret;
     }
     buf->current_config = buf->target_config;
-    k_busy_wait(5000);
-    reset_dl(dev);
+    k_busy_wait(CONFIG_UPDATE_TIME_US);
     return ret;
 }
 
 int update_current_config(const struct device* dev){
     pyd1598_buf_t* buf = dev->data;
-    int ret = build_config(dev);
-    if (ret) return ret;
-    ret = flash_config(dev);
-    if (ret) return ret;
-    if (config_get_current_operation_modes(dev) != OPERATION_MODES_FORCED_READOUT)
-        return SUCCESS;
-    ret = forced_readout(dev);
-    if (ret) return ret;
-    uint32_t received;
-    received = (buf->pyd1589_data_stream & CONFIG_RAW_MASK);
-    for (int _ = 1; _ <= 10; _++){
-        printk("\n\nATTEMPT (%d) -- expected: %"PRIX32", got: %"PRIX32 "\n\n", _, buf->current_config, received);
-        if (buf->current_config == received){
-            break;
-        }
-        ret = flash_config(dev);
-        if (ret) return ret;
-        ret = forced_readout(dev);
-        if (ret) return ret;
-        received = (buf->pyd1589_data_stream & CONFIG_RAW_MASK);
-    }
-    return buf->current_config == received ? SUCCESS : FAILURE;
+    pyd1598_itf_t* itf = dev->config;
+    if (build_config(dev))
+        return FAILURE;
+    if (flash_config(dev))
+        return FAILURE;
+
+    reset_dl(dev);
     
+    if (config_get_current_operation_modes(dev) == OPERATION_MODES_FORCED_READOUT){
+        gpio_pin_interrupt_configure_dt(&itf->direct_link_gpio, GPIO_INT_DISABLE);
+        gpio_remove_callback_dt(&itf->direct_link_gpio, &buf->dl_isr_handle);
+        verify_config(dev);
+    }
+    else{
+        gpio_add_callback(itf->direct_link_gpio.port, &buf->dl_isr_handle);
+        gpio_pin_interrupt_configure_dt(&itf->direct_link_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+    }
+    return SUCCESS;
+}
+
+int verify_config(const struct device* dev){
+    pyd1598_buf_t* buf = dev->data;
+    if (forced_readout(dev))
+        return FAILURE;
+    uint32_t received = buf->pyd1589_data_stream & CONFIG_RAW_MASK;
+    printk("\n----------------\n\
+        Expected: %"PRIX32", Got: %"PRIX32 "\n\n", buf->current_config, received);
+    return buf->current_config == received ? SUCCESS : FAILURE;
 }
 
 // Readout procedure preceeded by forced / interrupt pulse
 static int readout_of_bits(const struct device* dev, uint64_t* reading){
-    const pyd1598_itf_t* pyd1598_itf = dev->config;
+    const pyd1598_buf_t* buf = dev->data;
     uint64_t read_buf = 0;
-    uint32_t direct_link_pin = NRF_GPIO_PIN_MAP(1, pyd1598_itf->direct_link_gpio.pin);
     unsigned int lock = irq_lock(); // disable interrupts for timing sensitive section
     for (int index = NUM_DATA_BITS - 1; index >= 0; index--){
-        nrf_gpio_pin_clear(direct_link_pin);
-        nrf_gpio_cfg_output(direct_link_pin);
+        fast_gpio_output_low(&buf->fast_direct_link);
         k_busy_wait(DATA_CLK_LOW_TIME_US);
-        nrf_gpio_pin_set(direct_link_pin);
+        fast_gpio_set_high(&buf->fast_direct_link);
         k_busy_wait(DATA_CLK_LOW_TIME_US);
-        nrf_gpio_cfg_input(direct_link_pin, NRF_GPIO_PIN_NOPULL); // release direct-link (high-impedance)
+        fast_gpio_make_input(&buf->fast_direct_link); // release direct-link (high-impedance)
         // acquire and store bit (MSb sent frist)
         k_busy_wait(BIT_TIME_US);
-        if (nrf_gpio_pin_read(direct_link_pin))
+        if (fast_gpio_read(&buf->fast_direct_link))
             read_buf |= 1ULL << index;
     }
-    nrf_gpio_pin_clear(direct_link_pin);
-    nrf_gpio_cfg_output(direct_link_pin);
-    irq_unlock(lock);
+    fast_gpio_output_low(&buf->fast_direct_link);
     k_busy_wait(UPDATE_TIME_US);
+    irq_unlock(lock);
     reset_dl(dev);
-    // gpio_pin_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INPUT); // release direct-link (high-impedance)
     *reading = read_buf;
     return SUCCESS;
 }
@@ -401,7 +403,6 @@ static int _setup_pyd1598(const struct device* dev){
         &buf->dl_isr_handle,
         dl_isr_handler,
         BIT(itf->direct_link_gpio.pin));
-    gpio_add_callback(itf->direct_link_gpio.port, &buf->dl_isr_handle);
 
     // register interrupt_readout callback
     k_work_init(&buf->interrupt_readout_work, interrupt_readout_cb);

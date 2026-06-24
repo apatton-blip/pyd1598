@@ -19,7 +19,14 @@
         spi-peripheral = <&spi21>;
         direct-link-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
     };
+
+    // test_w1_gpio: test_w1_gpio {
+    //     compatible = "zephyr,w1-gpio";
+    //     gpios = <&gpio1 15>;
+    // };
 };
+
+
 
 &pinctrl {
     spim21_default: spim21_default {
@@ -45,3 +52,5 @@
 
     pinctrl-names = "default", "sleep";
 };
+
+

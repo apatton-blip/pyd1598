@@ -56,7 +56,7 @@ int config_set_target_operation_modes(const struct device* dev, operation_modes 
 // select ADC source (PIR BPF, PIR LPF, or Temperature)
 int config_set_target_signal_source(const struct device* dev, signal_source src);
 
-// set high-pass filter cutoff frequency. [cite: 255]
+// set high-pass filter cutoff frequency
 int config_set_target_hpf_cutoff(const struct device* dev, hpf_cutoff cutoff);
 
 // set pulse counting logic (with or without zero-crossing)

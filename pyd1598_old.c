@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/spi.h>
 #include "pyd1598.h"
 #include <errno.h>
 
@@ -21,7 +22,7 @@
 #define NUM_SERIAL_BITS 25
 #define NUM_DATA_BITS 40
 #define DATA_SETUP_TIME_US 120
-#define BIT_TIME_US 18 // will depend on capacitive load of direct link
+#define BIT_TIME_US 13 // will depend on capacitive load of direct link
 #define UPDATE_TIME_US 1250
 #define CONFIG_UPDATE_TIME_US 2400
 
@@ -71,23 +72,14 @@
 #define COUNT_MODE_RAW_MASK       0x1U
 #define COUNT_MODE_BIT_SHIFT      0
 #define COUNT_MODE_BIT_MASK       (COUNT_MODE_RAW_MASK << COUNT_MODE_BIT_SHIFT)
-
-#define PRINTER(val, prompt)\
-    printk(prompt);\
-    for (int index = 24; index >= 0; index--){\
-        printk("%d", (val >> index) & 1);\
-    };\
-    printk("\n");
-
-
-
+    
 // ROM
 /*
 pins to be configured in device tree
 */
 typedef struct pyd1598_itf {
     int instance_id;
-    struct gpio_dt_spec serin_gpio;
+    const struct device* spi_bus;
     struct gpio_dt_spec direct_link_gpio;
 } pyd1598_itf_t;
 
@@ -130,14 +122,19 @@ typedef struct pyd1598_buf {
     
 } pyd1598_buf_t;
 
+static const struct spi_config spi_cfg = {
+    .frequency = 1000000, // 1 MHz (1us resolution)
+    .operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8),
+    .slave = 0,
+    .cs = NULL
+};
+
 static void dl_isr_handler(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins);
 
 int config_set_threshold(const struct device* dev, uint8_t reg){
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~THRESHOLD_BIT_MASK;
     pyd1598_buf->pyd1598_config = pyd1598_buf->pyd1598_config | (uint32_t)reg << THRESHOLD_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;
 }
 
@@ -147,10 +144,8 @@ int config_set_blind_time(const struct device* dev, uint8_t reg){
         return -EINVAL;
     }
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~BLIND_TIME_BIT_MASK;
     pyd1598_buf->pyd1598_config = pyd1598_buf->pyd1598_config | (uint32_t)reg << BLIND_TIME_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;
 }
 
@@ -160,10 +155,8 @@ int config_set_pulse_counter(const struct device* dev, uint8_t reg){
         return -EINVAL;
     }
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~PULSE_COUNTER_BIT_MASK;
     pyd1598_buf->pyd1598_config |= (uint32_t)reg << PULSE_COUNTER_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;
 }
 
@@ -173,46 +166,36 @@ int config_set_window_time(const struct device* dev, uint8_t reg){
         return -EINVAL;
     }
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~WINDOW_TIME_BIT_MASK;
     pyd1598_buf->pyd1598_config |= (uint32_t)reg << WINDOW_TIME_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;
 }
 
 int config_set_operation_mode(const struct device* dev, operation_mode mode){
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~OPERATION_MODES_BIT_MASK;
     pyd1598_buf->pyd1598_config |= mode << OPERATION_MODES_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;
 }
 
 int config_set_signal_source(const struct device* dev, signal_source src){
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~SIGNAL_SOURCE_BIT_MASK;
     pyd1598_buf->pyd1598_config |= src << SIGNAL_SOURCE_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;    
 }
 
 int config_set_hpf_cutoff(const struct device* dev, hpf_cutoff cutoff){
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~HPF_CUTOFF_BIT_MASK;
     pyd1598_buf->pyd1598_config |= cutoff << HPF_CUTOFF_BIT_SHIFT;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;    
 }
 
 int config_set_count_mode(const struct device* dev, count_mode mode){
     pyd1598_buf_t* pyd1598_buf = dev->data;
-    PRINTER(pyd1598_buf->pyd1598_config, "before: ")
     pyd1598_buf->pyd1598_config &= ~COUNT_MODE_BIT_MASK;
     pyd1598_buf->pyd1598_config |= mode;
-    PRINTER(pyd1598_buf->pyd1598_config, "after : ")
     return SUCCESS;    
 }
 
@@ -255,56 +238,116 @@ static int configcmp(const struct device* dev){
     return (uint32_t)(validation_buf & CONFIG_BIT_MASK) == pyd1598_buf->pyd1598_config;
 }
 
-// Sets PIR's internal configuration using the serial interface
-static int _write_pyd1598_config(const struct device* dev){
-    const pyd1598_itf_t* pyd1598_itf = dev->config;
-    pyd1598_buf_t* pyd1598_buf = dev->data;
+// // Sets PIR's internal configuration using the serial interface
+// static int _write_pyd1598_config(const struct device* dev){
+//     const pyd1598_itf_t* itf = dev->config;
+//     pyd1598_buf_t* buf = dev->data;
 
-    uint8_t data[NUM_SERIAL_BITS] = {0};
-    for (int index = 0; index < NUM_SERIAL_BITS; index++){ data[index] = (pyd1598_buf->pyd1598_config >> index) & 1; }
+//     k_busy_wait(DATA_LOAD_TIME_US);
+
+//     // direct-link line must be held LOW by the hold system during configuration
+//     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
+//     unsigned int lock = irq_lock(); // disable interrupts for timing sensitive section
+//     for (int index = NUM_SERIAL_BITS - 1; index >= 0; index--){
+//         gpio_pin_set_dt(&itf->serin_gpio, LL_LOW);
+//         k_busy_wait(DATA_CLK_LOW_TIME_US);
+//         gpio_pin_set_dt(&itf->serin_gpio, LL_HIGH);
+//         k_busy_wait(DATA_CLK_HIGH_TIME_US);
+//         gpio_pin_set_dt(&itf->serin_gpio, buf->pyd1598_config >> index & 1);
+//         k_busy_wait(DATA_IN_HOLD_TIME_US); // hold data signal for minimum time stated in datasheet
+//     }
+//     gpio_pin_set_dt(&itf->serin_gpio, LL_LOW);
+//     irq_unlock(lock);
+//     // hold serial 'low' for minimum time stated in datasheet to signal configuration is complete
+//     k_busy_wait(DATA_LOAD_TIME_US);
     
-    // direct-link line must be held LOW by the hold system during configuration
-    gpio_pin_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_OUTPUT_LOW);
-    unsigned int lock = irq_lock(); // disable interrupts for timing sensitive section
-    gpio_pin_set_dt(&pyd1598_itf->serin_gpio, LL_LOW);
-    for (int index = NUM_SERIAL_BITS - 1; index >= 0; index--){
-        k_busy_wait(DATA_CLK_LOW_TIME_US);
-        gpio_pin_set_dt(&pyd1598_itf->serin_gpio, LL_HIGH); // clock rising edge -- mcu instruction cycle should handle 200ns hold required by datasheet
-        k_busy_wait(DATA_CLK_HIGH_TIME_US);
-        gpio_pin_set_dt(&pyd1598_itf->serin_gpio, data[index]);
-        k_busy_wait(DATA_IN_HOLD_TIME_US); // hold data signal for minimum time stated in datasheet
-        gpio_pin_set_dt(&pyd1598_itf->serin_gpio, LL_LOW);
+//     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_INPUT); // release direct-link (high-impedance)
+//     k_busy_wait(CONFIG_UPDATE_TIME_US);
+//     return SUCCESS;
+// }
+
+#define MAX_TX_BUFFER_SIZE 500
+#define PER_BYTE_TIME_US 8 // 1MHz Clk -> (1 us / 1 bit) * (8 bits / 1 byte) = 8 us / byte
+#define CLK_END_HIGH_BYTE 0x7F // 0111 1111
+#define CLK_END_LOW_BYTE 0x40 //  0100 0000
+// Sets PIR's internal configuration using the serial interface
+static int build_config(const struct device* dev){
+    #define NUM_HOLD_BYTES DATA_IN_HOLD_TIME_US / PER_BYTE_TIME_US
+
+    const pyd1598_itf_t* itf = dev->config;
+    pyd1598_buf_t* buf = dev->data;
+    static uint8_t tx_start[18]; memset(tx_start, 0xFF, sizeof(tx_start));
+    static uint8_t data_load_buf[DATA_LOAD_TIME_US / PER_BYTE_TIME_US + 1] = {0};
+    // will generate a 650us hold
+    static uint8_t tx_buf[MAX_TX_BUFFER_SIZE];
+
+    uint16_t tx_buf_index = 0;
+    // hold time will be rounded down to a multiple of PER_BYTE_TIME_US
+    const uint8_t num_hold_bytes = DATA_IN_HOLD_TIME_US / PER_BYTE_TIME_US;
+    // +1 for CLK_END_(*)_BYTE
+    if ((NUM_HOLD_BYTES + 1) * NUM_SERIAL_BITS > MAX_TX_BUFFER_SIZE){
+        printk("Illegal DATA_IN_HOLD_TIME_US was used. Try [80, 150]");
+        return FAILURE;
     }
-    irq_unlock(lock);
-    // hold serial 'low' for minimum time stated in datasheet to signal configuration is complete
-    k_busy_wait(DATA_LOAD_TIME_US);
+    for (int serial_index = NUM_SERIAL_BITS - 1; serial_index >= 0; serial_index--){
+        if ((buf->pyd1598_config >> serial_index) & 1){
+            tx_buf[tx_buf_index++] = CLK_END_HIGH_BYTE;
+            for (uint8_t _ = 0; _ < num_hold_bytes; _++){ tx_buf[tx_buf_index++] = 0xFF; }
+        }
+        else{
+            tx_buf[tx_buf_index++] = CLK_END_LOW_BYTE;
+            for (uint8_t _ = 0; _ < num_hold_bytes; _++){ tx_buf[tx_buf_index++] = 0x00; }
+        }
+    }
+
     
-    gpio_pin_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INPUT); // release direct-link (high-impedance)
-    k_busy_wait(CONFIG_UPDATE_TIME_US);
-    return SUCCESS;
+    struct spi_buf spi_buffers[4] = {
+        {tx_start, sizeof(tx_start)},
+        {data_load_buf, sizeof(data_load_buf)},
+        {tx_buf, tx_buf_index},
+        {data_load_buf, sizeof(data_load_buf)}
+    };
+
+    struct spi_buf_set spi_set_buffers = {
+        .buffers = spi_buffers,
+        .count = 4
+    };
+
+    gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
+    gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_INPUT);
+    int ret = spi_write(itf->spi_bus, &spi_cfg, &spi_set_buffers);
+    k_busy_wait(5000);
+
+    return ret;
 }
+
+
 
 int update_pyd1598_config(const struct device* dev){
     const pyd1598_itf_t* pyd1598_itf = dev->config;
     pyd1598_buf_t* pyd1598_buf = dev->data;
     operation_mode mode = (pyd1598_buf->pyd1598_config >> OPERATION_MODES_BIT_SHIFT) & OPERATION_MODES_RAW_MASK;
-    config_set_operation_mode(dev, OPERATION_MODE_FORCED_READOUT);
+    // config_set_operation_mode(dev, OPERATION_MODE_FORCED_READOUT);
     int ret;
-    for (int tries = 0; tries < 5; tries++){
-        _write_pyd1598_config(dev);
+    // (buf->pyd1589_data_stream >> CONFIG_BIT_SHIFT) & CONFIG_RAW_MASK
+    // for (int tries = 0; tries < 5; tries++){
+        printk("error code: %d\n", build_config(dev));
         ret = configcmp(dev);
-        if (ret)
-            break;
-    }
-    config_set_operation_mode(dev, mode);
+        k_busy_wait(2000);
+        printk("error code: %d\n", build_config(dev));
+        ret = configcmp(dev);
+        // if (ret)
+        //     break;
+    // }
+    // config_set_operation_mode(dev, mode);
 
-    if (!ret)
-        return FAILURE;
+    // if (!ret)
+    //     return FAILURE;
 
     if (mode != OPERATION_MODE_FORCED_READOUT){
-        for (int tries = 0; tries < 5; tries++){
-            _write_pyd1598_config(dev);
-        }
+        // for (int tries = 0; tries < 5; tries++){
+        //     _write_pyd1598_config(dev);
+        // }
         gpio_pin_interrupt_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INT_EDGE_TO_ACTIVE);
     }
     else {
@@ -320,14 +363,16 @@ int forced_readout(const struct device* dev){
     if (!pyd1598_buf->initilaized) { return FAILURE;}
     uint64_t buf;
     // initiate read via low->high transition
+    // gpio_pin_interrupt_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INT_DISABLE); // added
     gpio_pin_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_OUTPUT_HIGH);
     k_busy_wait(DATA_SETUP_TIME_US);
     int ret = _readout_of_bits(dev, &buf);
     if (!ret){ pyd1598_buf->pyd1589_data_stream = buf; }
+    // gpio_pin_interrupt_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INT_EDGE_TO_ACTIVE); // added
     return ret;
 }
 
-void _interrupt_readout(struct k_work* work){
+void interrupt_readout_cb(struct k_work* work){
     printk("interrupt has been called!\n");
     pyd1598_buf_t* pyd1598_buf = CONTAINER_OF(work, pyd1598_buf_t, interrupt_readout_work);
     const pyd1598_itf_t* pyd1598_itf = pyd1598_buf->dev->config;
@@ -354,10 +399,21 @@ void print_pyd1598_reading(const struct device* dev){
             // prepend signed bits
             adc_counts = raw_adc_counts | 0xC000;
         printk("adc counts: %" PRId16 "\n", adc_counts);
+        printk("found config: %" PRIu32 "\n", (uint32_t)(buf->pyd1589_data_stream & CONFIG_RAW_MASK));
+        printk("target config: %" PRIu32 "\n\n", buf->pyd1598_config & CONFIG_RAW_MASK);
     }
     else{
-        printk("adc counts: %" PRIu16 "\n", raw_adc_counts);
+        printk("adc counts: %" PRIu16 "\n");
+        printk("found config: %" PRIu32 "\n", (uint32_t)(buf->pyd1589_data_stream & CONFIG_RAW_MASK));
+        printk("target config: %" PRIu32 "\n\n", buf->pyd1598_config & CONFIG_RAW_MASK);
     }
+}
+
+int set_wakeup_cb(const struct device *dev, pyd1598_isr_safe_cb_t cb, void *user_data){
+	pyd1598_buf_t *pyd1598_buf = dev->data;
+	pyd1598_buf->wakeup_mode_cb = cb;
+	pyd1598_buf->user_data = user_data;
+	return 0;
 }
 
 static void dl_isr_handler(const struct device* port, struct gpio_callback *cb, gpio_port_pins_t pins){
@@ -375,7 +431,7 @@ static void dl_isr_handler(const struct device* port, struct gpio_callback *cb, 
 
     else if (mode == OPERATION_MODE_WAKEUP) {
         if (pyd1598_buf->wakeup_mode_cb) {
-            // pyd1598_buf->wakeup_mode_cb(dev, pyd1598_buf->user_data);
+            pyd1598_buf->wakeup_mode_cb(dev, pyd1598_buf->user_data);
         }
     }
 }
@@ -385,7 +441,7 @@ static int _setup_pyd1598(const struct device* dev){
     const pyd1598_itf_t* pyd1598_itf = dev->config;
     pyd1598_buf_t* pyd1598_buf = dev->data;
     pyd1598_buf->dev = dev;
-    pyd1598_buf->initilaized = false;
+
     // register data-link callback
     gpio_init_callback(
         &pyd1598_buf->dl_isr_handle,
@@ -393,34 +449,39 @@ static int _setup_pyd1598(const struct device* dev){
         BIT(pyd1598_itf->direct_link_gpio.pin));
     gpio_add_callback(pyd1598_itf->direct_link_gpio.port, &pyd1598_buf->dl_isr_handle);
 
-    k_work_init(&pyd1598_buf->interrupt_readout_work, _interrupt_readout);
+    // register interrupt_readout callback
+    k_work_init(&pyd1598_buf->interrupt_readout_work, interrupt_readout_cb);
     pyd1598_buf->wakeup_mode_cb = NULL;
     pyd1598_buf->pyd1598_config = EMPTY_CONFIG; // set reserved bits
 
-    if (!gpio_is_ready_dt(&pyd1598_itf->serin_gpio) || !gpio_is_ready_dt(&pyd1598_itf->direct_link_gpio)){
+        
+    
+    if (!device_is_ready(pyd1598_itf->spi_bus) || !gpio_is_ready_dt(&pyd1598_itf->direct_link_gpio)){
         printk("Serial and / or Direct Link GPIO not ready\n");
         return -ENODEV;
     }
-    gpio_pin_configure_dt(&pyd1598_itf->serin_gpio, GPIO_OUTPUT);
     gpio_pin_configure_dt(&pyd1598_itf->direct_link_gpio, GPIO_INPUT);
     return 0;
 }
 
-#define PYD1598_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(tactacam_pyd1598)
+#define DT_DRV_COMPAT tactacam_pyd1598
 
-static pyd1598_buf_t pyd1598_buf_0;
+#define INIT_PYD1598(inst)\
+    static const pyd1598_itf_t itf_##inst = {\
+        .instance_id = inst,\
+        .direct_link_gpio = GPIO_DT_SPEC_INST_GET(inst, direct_link_gpios),\
+        .spi_bus = DEVICE_DT_GET(DT_INST_PHANDLE(inst, spi_peripheral)),\
+    };\
+    static pyd1598_buf_t buf_##inst;\
+    DEVICE_DT_INST_DEFINE(\
+        inst,\
+        _setup_pyd1598,\
+        NULL,\
+        &buf_##inst,\
+        &itf_##inst,\
+        POST_KERNEL,\
+        90,\
+        NULL\
+    );
 
-static const pyd1598_itf_t pyd1598_itf_0 = {
-    .instance_id = 0,
-    .serin_gpio = GPIO_DT_SPEC_GET(PYD1598_NODE, serin_gpios),
-    .direct_link_gpio = GPIO_DT_SPEC_GET(PYD1598_NODE, direct_link_gpios),
-};
-
-DEVICE_DT_DEFINE(PYD1598_NODE,
-                 _setup_pyd1598,
-                 NULL,
-                 &pyd1598_buf_0,
-                 &pyd1598_itf_0,
-                 POST_KERNEL,
-                 90,
-                 NULL);
+DT_INST_FOREACH_STATUS_OKAY(INIT_PYD1598)
