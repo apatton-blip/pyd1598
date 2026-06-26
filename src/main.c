@@ -53,16 +53,6 @@ void numbered_read(int range){
     }
 }
 
-void two_config_test(void){
-    while(true){
-        flash_custom_config_1();
-        numbered_read(50);
-    
-        flash_custom_config_2();
-        numbered_read(10);
-    }
-}
-
 void wakeup_cb(const struct device* dev, void* user_data){
     config_set_target_operation_modes(dev, OPERATION_MODES_FORCED_READOUT);
     update_current_config(dev);
