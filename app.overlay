@@ -17,13 +17,9 @@
         compatible = "tactacam,pyd1598";
         status = "okay";
         spi-peripheral = <&spi21>;
-        direct-link-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+        direct-link-gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | NRF_GPIO_DRIVE_H0H1)>;
     };
-
-    // test_w1_gpio: test_w1_gpio {
-    //     compatible = "zephyr,w1-gpio";
-    //     gpios = <&gpio1 15>;
-    // };
+    
 };
 
 

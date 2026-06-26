@@ -1,0 +1,4 @@
+#define ENABLED 1
+#define DISABLED 0
+
+#define PYD_DEBUG DISABLED

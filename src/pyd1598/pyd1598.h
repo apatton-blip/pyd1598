@@ -1,14 +1,4 @@
-
-
-#include <zephyr/kernel.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
-
-typedef struct pyd1598_itf {
-    int instance_id;
-    const struct device* spi_bus;
-    struct gpio_dt_spec direct_link_gpio;
-} pyd1598_itf_t;
 
 typedef enum op_mode {
     OPERATION_MODES_FORCED_READOUT = 0,
@@ -34,7 +24,11 @@ typedef enum cm {
     COUNT_MODE_WITHOUT_BPF_SIGN_CHANGE = 1
 } count_mode;
 
-typedef void (*pyd1598_isr_safe_cb_t)(const struct device *dev, void *user_data);
+typedef void (*pyd_cb)(const struct device *dev, void *user_data);
+
+int set_wakeup_cb(const struct device *dev, pyd_cb cb, void *user_data);
+
+int set_interrupt_readout_cb(const struct device *dev, pyd_cb cb, void *user_data);
 
 int set_config_bypass(const struct device* dev, uint32_t config);
 
@@ -78,12 +72,16 @@ hpf_cutoff config_get_current_hpf_cutoff(const struct device* dev);
 
 count_mode config_get_current_count_mode(const struct device* dev);
 
+int32_t get_last_adc_count_reading(const struct device* dev);
+
+int32_t get_last_config_reading(const struct device* dev);
+
+bool get_last_oor_reading(const struct device* dev);
+
 // atomic build and flash operation; syncs current config with target
 int update_current_config(const struct device* dev);
 
-int forced_readout(const struct device* dev);
-
-int set_wakeup_cb(const struct device *dev, pyd1598_isr_safe_cb_t cb, void *user_data);
+int update_reading(const struct device* dev);
 
 void print_pyd1598_reading(const struct device* dev);
 
