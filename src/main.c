@@ -10,6 +10,22 @@ static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(BUTN0_NODE, gpios);
 
 extern void init_debug(void);
 
+void wakeup_cb(const struct device* dev, void* user_data){
+    config_set_target_operation_modes(dev, OPERATION_MODES_FORCED_READOUT);
+    update_current_config(dev);
+    print_config_readable(dev);
+
+    numbered_read(20); // accumulate data
+
+    config_set_target_operation_modes(dev, OPERATION_MODES_WAKEUP); // return to sleep
+    update_current_config(dev);
+    print_config_readable(dev);
+}
+
+void interrupt_readout_cb(const struct device* dev, void* user_data){
+    print_pyd1598_reading(dev); // ensure INTERRUPT_READOUT_ADC_UPDATES is ENABLED
+}
+
 int setup(void){
     int ret = 0;
     if (dev == NULL || !device_is_ready(dev))
@@ -53,22 +69,6 @@ void numbered_read(int range){
     }
 }
 
-void wakeup_cb(const struct device* dev, void* user_data){
-    config_set_target_operation_modes(dev, OPERATION_MODES_FORCED_READOUT);
-    update_current_config(dev);
-    print_config_readable(dev);
-
-    numbered_read(20); // accumulate data
-
-    config_set_target_operation_modes(dev, OPERATION_MODES_WAKEUP); // return to sleep
-    update_current_config(dev);
-    print_config_readable(dev);
-}
-
-void interrupt_readout_cb(const struct device* dev, void* user_data){
-    read_pyd();
-}
-
 int main(void){
     k_msleep(2000); // Wait for serial terminal to instantiate
     int setup_ret = setup();
@@ -77,6 +77,7 @@ int main(void){
         return 1;
 
     flash_camera_config();
+    config_set_target_operation_modes(dev, OPERATION_MODES_INTERRUPT_READOUT);
     update_current_config(dev);
     print_config_readable(dev);
 

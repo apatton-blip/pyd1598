@@ -433,12 +433,23 @@ static void dl_interrupt_cb(struct k_work* work){
     pyd1598_buf_t* buf = CONTAINER_OF(work, pyd1598_buf_t, dl_interrupt_work); // recover device inst pointer
     const struct device* dev = buf->dev;
     
-    clear_interrupt(dev);
-
     if (config_get_current_operation_modes(dev) == OPERATION_MODES_INTERRUPT_READOUT && buf->interrupt_readout_cb){
-        buf->interrupt_readout_cb(dev, buf->interrupt_readout_cb_data);
+#if INTERRUPT_READOUT_ADC_UPDATES
+        disable_dl_int(dev);
+        update_reading(dev);
+#else
+        clear_interrupt(dev);
+#endif
+        if (buf->interrupt_readout_cb)
+            buf->interrupt_readout_cb(dev, buf->interrupt_readout_cb_data);
     }
     else if (config_get_current_operation_modes(dev) == OPERATION_MODES_WAKEUP && buf->wakeup_cb){
+#if WAKEUP_ADC_UPDATES
+        disable_dl_int(dev);
+        update_reading(dev);
+#else
+        clear_interrupt(dev);
+#endif
         buf->wakeup_cb(dev, buf->wakeup_cb_data);
     }
 
@@ -500,8 +511,9 @@ int set_interrupt_readout_cb(const struct device *dev, pyd_cb cb, void *user_dat
 }
 
 void print_pyd1598_reading(const struct device* dev){
-    printk("adc counts: %5" PRId32" -- found config: 0x%07"PRIX32" - %s\n",
-        get_last_adc_count_reading(dev),
+    int32_t adc_counts = get_last_adc_count_reading(dev);
+    printk("adc counts: %5" PRId32" - found config: 0x%07"PRIX32" - %s\n",
+        adc_counts,
         get_last_config_reading(dev),
         get_last_oor_reading(dev) ? "OK" : "RESET");
 }
