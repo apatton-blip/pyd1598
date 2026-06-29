@@ -2,6 +2,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/logging/log.h>
 // #include <errno.h>
 
 #include "pyd1598.h"
@@ -128,11 +129,11 @@ static uint8_t DATA_LOAD_BUF[DATA_LOAD_TIME_US / PER_BYTE_TIME_US + 1] = {0};
 
 bool is_valid_config(uint32_t config){
     if (config > CONFIG_RAW_MASK){
-        printk("Invalid Config: Configuration must be a value [0x0, 0x1FFFFFF]\n");
+        LOG_INF("Invalid Config: Configuration must be a value [0x0, 0x1FFFFFF].\n");
         return false;
     }
     if ((config & RESERVED_BIT_MASK) ^ EMPTY_CONFIG){
-        printk("Invalid Config: Reserved are not set.\n");
+        LOG_INF("Invalid Config: Reserved are not set.\n");
         return false;
     }
     return true;
@@ -155,7 +156,7 @@ int config_set_target_threshold(const struct device* dev, uint8_t reg){
 
 int config_set_target_blind_time(const struct device* dev, uint8_t reg){
     if (reg > 15){
-        printk("Blind Time register must be a value [0, 15]\n");
+        LOG_INF("Blind Time register must be a value [0, 15].\n");
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
@@ -166,7 +167,7 @@ int config_set_target_blind_time(const struct device* dev, uint8_t reg){
 
 int config_set_target_pulse_counter(const struct device* dev, uint8_t reg){
     if (reg > 3){
-        printk("Pulse Counter register must be a value [0, 3]\n");
+        LOG_INF("Pulse Counter register must be a value [0, 3].\n");
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
@@ -177,7 +178,7 @@ int config_set_target_pulse_counter(const struct device* dev, uint8_t reg){
 
 int config_set_target_window_time(const struct device* dev, uint8_t reg){
     if (reg > 3){
-        printk("Window Time register must be a value [0, 3]\n");
+        LOG_INF("Window Time register must be a value [0, 3].\n");
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
@@ -364,7 +365,7 @@ static int readout_of_bits(const struct device* dev, uint64_t* reading){
     k_busy_wait(UPDATE_TIME_US);
     irq_unlock(lock);
     reset_dl(dev);
-    if (gpio_pin_get_dt(&itf->direct_link_gpio))
+    if (gpio_pin_get_dt(&itf->direct_link_gpio)) // reading likely corrupted
         return FAILURE;
     *reading = read_buf;
     return SUCCESS;
@@ -408,9 +409,10 @@ int update_reading(const struct device* dev){
     // initiate read via low->high transition
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_HIGH);
     k_busy_wait(DATA_SETUP_TIME_US);
-    int ret = readout_of_bits(dev, &reading);
-    if (ret == SUCCESS){ buf->pyd1589_data_stream = reading; }
-    return ret;
+    if (readout_of_bits(dev, &reading))
+        return FAILURE;
+    buf->pyd1589_data_stream = reading;
+    return SUCCESS;
 }
 
 static void dl_isr(const struct device* port, struct gpio_callback *cb, gpio_port_pins_t pins){
@@ -465,9 +467,7 @@ static int _setup_pyd1598(const struct device* dev){
     pyd1598_buf_t* buf = dev->data;
     // check if port are ready
     if (!device_is_ready(itf->spi_bus) || !gpio_is_ready_dt(&itf->direct_link_gpio)){
-#if PYD_DEBUG
-        printk("Serial and / or Direct Link GPIO not ready\n");
-#endif
+        LOG_ERR("Serial and / or Direct Link GPIO not ready\n");
         return FAILURE;
     }
 
