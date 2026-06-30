@@ -8,8 +8,6 @@
 #include "pyd1598.h"
 #include "params.h"
 
-extern void debug_event(void);
-
 #define SUCCESS 0
 #define FAILURE 1
 
@@ -95,6 +93,8 @@ typedef struct pyd1598_itf {
 
 typedef struct pyd1598_buf {
     const struct device* dev; // reverse pointer
+    bool config_dirty;
+
     // sensor data
     uint32_t target_config;
     uint32_t current_config;
@@ -127,6 +127,8 @@ static const struct spi_config spi_cfg = {
 
 static uint8_t DATA_LOAD_BUF[DATA_LOAD_TIME_US / PER_BYTE_TIME_US + 1] = {0};
 
+LOG_MODULE_REGISTER(pyd1598, LOG_LEVEL_INF);
+
 bool is_valid_config(uint32_t config){
     if (config > CONFIG_RAW_MASK){
         LOG_INF("Invalid Config: Configuration must be a value [0x0, 0x1FFFFFF].\n");
@@ -139,19 +141,30 @@ bool is_valid_config(uint32_t config){
     return true;
 }
 
-int set_config_bypass(const struct device* dev, uint32_t config){
+static int set_target_config(const struct device* dev, uint32_t config){
     pyd1598_buf_t* buf = dev->data;
     if (!is_valid_config(config))
         return FAILURE;
     buf->target_config = config;
+    buf->config_dirty = true;
     return SUCCESS;
+}
+
+static bool config_has_changed(const struct device* dev){
+    pyd1598_buf_t* buf = dev->data;
+    return buf->config_dirty;
+}
+
+int set_config_bypass(const struct device* dev, uint32_t config){
+    return set_target_config(dev, config);
 }
 
 int config_set_target_threshold(const struct device* dev, uint8_t reg){
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~THRESHOLD_BIT_MASK;
-    buf->target_config = buf->target_config | (uint32_t)reg << THRESHOLD_BIT_SHIFT;
-    return SUCCESS;
+    uint32_t config = buf->target_config;
+    config &= ~THRESHOLD_BIT_MASK;
+    config |= (uint32_t)reg << THRESHOLD_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_blind_time(const struct device* dev, uint8_t reg){
@@ -160,9 +173,10 @@ int config_set_target_blind_time(const struct device* dev, uint8_t reg){
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~BLIND_TIME_BIT_MASK;
-    buf->target_config = buf->target_config | (uint32_t)reg << BLIND_TIME_BIT_SHIFT;
-    return SUCCESS;
+    uint32_t config = buf->target_config;
+    config &= ~BLIND_TIME_BIT_MASK;
+    config |= (uint32_t)reg << BLIND_TIME_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_pulse_counter(const struct device* dev, uint8_t reg){
@@ -171,9 +185,10 @@ int config_set_target_pulse_counter(const struct device* dev, uint8_t reg){
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~PULSE_COUNTER_BIT_MASK;
-    buf->target_config |= (uint32_t)reg << PULSE_COUNTER_BIT_SHIFT;
-    return SUCCESS;
+    uint32_t config = buf->target_config;
+    config &= ~PULSE_COUNTER_BIT_MASK;
+    config |= (uint32_t)reg << PULSE_COUNTER_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_window_time(const struct device* dev, uint8_t reg){
@@ -182,37 +197,42 @@ int config_set_target_window_time(const struct device* dev, uint8_t reg){
         return FAILURE;
     }
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~WINDOW_TIME_BIT_MASK;
-    buf->target_config |= (uint32_t)reg << WINDOW_TIME_BIT_SHIFT;
-    return SUCCESS;
+    uint32_t config = buf->target_config;
+    config &= ~WINDOW_TIME_BIT_MASK;
+    config |= (uint32_t)reg << WINDOW_TIME_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_operation_modes(const struct device* dev, operation_modes mode){
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~OPERATION_MODES_BIT_MASK;
-    buf->target_config |= mode << OPERATION_MODES_BIT_SHIFT;
-    return SUCCESS;
+    uint32_t config = buf->target_config;
+    config &= ~OPERATION_MODES_BIT_MASK;
+    config |= mode << OPERATION_MODES_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_signal_source(const struct device* dev, signal_source src){
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~SIGNAL_SOURCE_BIT_MASK;
-    buf->target_config |= src << SIGNAL_SOURCE_BIT_SHIFT;
-    return SUCCESS;    
+    uint32_t config = buf->target_config;
+    config &= ~SIGNAL_SOURCE_BIT_MASK;
+    config |= src << SIGNAL_SOURCE_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_hpf_cutoff(const struct device* dev, hpf_cutoff cutoff){
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~HPF_CUTOFF_BIT_MASK;
-    buf->target_config |= cutoff << HPF_CUTOFF_BIT_SHIFT;
-    return SUCCESS;    
+    uint32_t config = buf->target_config;
+    config &= ~HPF_CUTOFF_BIT_MASK;
+    config |= cutoff << HPF_CUTOFF_BIT_SHIFT;
+    return set_target_config(dev, config);
 }
 
 int config_set_target_count_mode(const struct device* dev, count_mode mode){
     pyd1598_buf_t* buf = dev->data;
-    buf->target_config &= ~COUNT_MODE_BIT_MASK;
-    buf->target_config |= mode;
-    return SUCCESS;    
+    uint32_t config = buf->target_config;
+    config &= ~COUNT_MODE_BIT_MASK;
+    config |= mode;
+    return set_target_config(dev, config);
 }
 
 uint8_t config_get_current_threshold(const struct device* dev){
@@ -274,9 +294,6 @@ bool get_last_oor_reading(const struct device* dev){
 static void enable_dl_int(const struct device* dev){
     const pyd1598_itf_t* itf = dev->config;
     pyd1598_buf_t* buf = dev->data;
-#if PYD_DEBUG
-    printk("interrupts are enabled.\n");
-#endif
     if (buf->interrupts_enabled)
         return;
     buf->interrupts_enabled = true;
@@ -287,9 +304,6 @@ static void enable_dl_int(const struct device* dev){
 static void disable_dl_int(const struct device* dev){
     const pyd1598_itf_t* itf = dev->config;
     pyd1598_buf_t* buf = dev->data;
-#if PYD_DEBUG
-    printk("interrupts are disabled.\n");
-#endif
     if (buf->interrupts_enabled){
         buf->interrupts_enabled = false;
         gpio_pin_interrupt_configure_dt(&itf->direct_link_gpio, GPIO_INT_DISABLE);
@@ -314,9 +328,7 @@ static int build_config(const struct device* dev){
 
     // +1 for CLK_END_(*)_BYTE
     if ((NUM_HOLD_BYTES + 1) * NUM_SERIAL_BITS > MAX_TX_BUFFER_SIZE){
-#if PYD_DEBUG
-        printk("Illegal DATA_IN_HOLD_TIME_US was used. Try [80, 150]");
-#endif
+        LOG_WRN("Illegal DATA_IN_HOLD_TIME_US was used. Try [80, 150]");
         return FAILURE;
     }
     for (int serial_index = NUM_SERIAL_BITS - 1; serial_index >= 0; serial_index--){
@@ -329,6 +341,7 @@ static int build_config(const struct device* dev){
     }
     buf->spi_buffer[1].buf = buf->tx_buf;
     buf->spi_buffer[1].len = tx_buf_index;
+    buf->config_dirty = false;
     return SUCCESS;
 }
 
@@ -378,19 +391,13 @@ static int verify_config(const struct device* dev){
     // initiate read via low->high transition
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_HIGH);
     k_busy_wait(DATA_SETUP_TIME_US);
-    if (readout_of_bits(dev, &received))
+    if (readout_of_bits(dev, &received)){}
         return FAILURE;
-#if PYD_DEBUG
-    printk("\tExpected: 0x%07"PRIX32", Got: 0x%07"PRIX64 "\n", buf->current_config, received);
-#endif
     return (received & CONFIG_RAW_MASK) == buf->current_config ? SUCCESS : FAILURE;
 }
 
 int update_current_config(const struct device* dev){
-    pyd1598_buf_t* buf = dev->data;
-    if (!is_valid_config(buf->target_config))
-        return FAILURE;
-    if (build_config(dev))
+    if (config_has_changed(dev) && build_config(dev)) // short circuit
         return FAILURE;
     disable_dl_int(dev);
     if (flash_config(dev))
@@ -420,39 +427,41 @@ static void dl_isr(const struct device* port, struct gpio_callback *cb, gpio_por
     k_work_submit(&buf->dl_interrupt_work); // offload work to gloabl work queue
 }
 
-// clear PIR interrupt and keep direct-link low
-static void clear_interrupt(const struct device* dev){
+static void clear_wakeup(const struct device* dev){
+#if WAKEUP_ADC_UPDATES
+    update_reading(dev);
+#else
     const pyd1598_itf_t* itf = dev->config;
-    disable_dl_int(dev);    
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
     k_busy_wait(INT_CLEAR_TIME_US);
+#endif
+}
+
+static void clear_interrupt_readout(const struct device* dev){
+#if INTERRUPT_READOUT_ADC_UPDATES
+    update_reading(dev);
+#else
+    const pyd1598_itf_t* itf = dev->config;
+    gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
+    k_busy_wait(INT_CLEAR_TIME_US);
+#endif
 }
 
 static void dl_interrupt_cb(struct k_work* work){
-#if PYD_DEBUG
-    printk("an interrupt has been called!\n");
-#endif
     pyd1598_buf_t* buf = CONTAINER_OF(work, pyd1598_buf_t, dl_interrupt_work); // recover device inst pointer
     const struct device* dev = buf->dev;
     
-    if (config_get_current_operation_modes(dev) == OPERATION_MODES_INTERRUPT_READOUT && buf->interrupt_readout_cb){
-#if INTERRUPT_READOUT_ADC_UPDATES
-        disable_dl_int(dev);
-        update_reading(dev);
-#else
-        clear_interrupt(dev);
-#endif
+    disable_dl_int(dev);
+
+    if (config_get_current_operation_modes(dev) == OPERATION_MODES_INTERRUPT_READOUT){
+        clear_interrupt_readout(dev);
         if (buf->interrupt_readout_cb)
             buf->interrupt_readout_cb(dev, buf->interrupt_readout_cb_data);
     }
-    else if (config_get_current_operation_modes(dev) == OPERATION_MODES_WAKEUP && buf->wakeup_cb){
-#if WAKEUP_ADC_UPDATES
-        disable_dl_int(dev);
-        update_reading(dev);
-#else
-        clear_interrupt(dev);
-#endif
-        buf->wakeup_cb(dev, buf->wakeup_cb_data);
+    else if (config_get_current_operation_modes(dev) == OPERATION_MODES_WAKEUP){
+        clear_wakeup(dev);
+        if (buf->wakeup_cb) 
+            buf->wakeup_cb(dev, buf->wakeup_cb_data);
     }
 
     if (!buf->interrupts_enabled) { // ensure clean config
@@ -486,6 +495,7 @@ static int _setup_pyd1598(const struct device* dev){
 
     buf->dev = dev; // link reverse pointer
     buf->target_config = EMPTY_CONFIG; // set reserved bits
+    buf->config_dirty = true;
     
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_LOW);
 
