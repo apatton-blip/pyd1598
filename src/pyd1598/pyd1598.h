@@ -183,8 +183,10 @@ int update_current_config(const struct device* dev);
 
 /**
  * @brief Initiates a Direct Link read sequence to fetch 40 bits (ADC, Config, and Flags) 
- * into the internal buffer. 
+ * into the internal buffer.
  * @return 0 on success, 1 on failure.
+ * @note if INTERRUPT_READOUT_ADC_UPDATES or WAKEUP_ADC_UPDATES is enabled,
+ * update_reading will be done before the registered callback executes.
  */
 int update_reading(const struct device* dev);
 

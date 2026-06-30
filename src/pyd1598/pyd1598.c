@@ -3,7 +3,8 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
-// #include <errno.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #include "pyd1598.h"
 #include "params.h"
@@ -321,7 +322,7 @@ static void reset_dl(const struct device* dev){
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_INPUT);
 }
 
-// build and load configuration into SPI memory
+// build and load configuration into memory
 static int build_config(const struct device* dev){
     pyd1598_buf_t* buf = dev->data;
     uint16_t tx_buf_index = 0;
@@ -345,7 +346,7 @@ static int build_config(const struct device* dev){
     return SUCCESS;
 }
 
-// flash PIR using SPI MOSI, and sync current config with target
+// flash PIR and sync current config with target
 static int flash_config(const struct device* dev){
     pyd1598_buf_t* buf = dev->data;
     const pyd1598_itf_t* itf = dev->config;
@@ -358,7 +359,7 @@ static int flash_config(const struct device* dev){
     return SUCCESS;
 }
 
-// Readout procedure preceeded by forced / interrupt pulse
+// 40-bit readout procedure preceeded by forced / interrupt pulse
 static int readout_of_bits(const struct device* dev, uint64_t* reading){
     const pyd1598_itf_t* itf = dev->config;
     uint64_t read_buf = 0;
@@ -391,7 +392,7 @@ static int verify_config(const struct device* dev){
     // initiate read via low->high transition
     gpio_pin_configure_dt(&itf->direct_link_gpio, GPIO_OUTPUT_HIGH);
     k_busy_wait(DATA_SETUP_TIME_US);
-    if (readout_of_bits(dev, &received)){}
+    if (readout_of_bits(dev, &received))
         return FAILURE;
     return (received & CONFIG_RAW_MASK) == buf->current_config ? SUCCESS : FAILURE;
 }
